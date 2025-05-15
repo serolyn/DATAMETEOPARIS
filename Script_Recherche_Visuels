@@ -1,0 +1,220 @@
+
+
+import pandas as pd
+from pathlib import Path
+
+# ======================================================================
+FILES = [Path("DECADQ_75_previous-1950-2023.csv.gz"),Path("DECADQ_75_latest-2024-2025.csv.gz")
+]
+
+
+df = pd.concat([pd.read_csv(f, sep=";", compression="gzip",encoding="utf-8", decimal=",", low_memory=False)for f in FILES],ignore_index=True)
+
+# construction de la date
+df["year"]  = df["AAAAMM"] // 100
+df["month"] = df["AAAAMM"] % 100
+df["day"]   = df["NUM_DECADE"].map({1: 1, 2: 11, 3: 21})
+df["date"]  = pd.to_datetime(dict(year=df.year,month=df.month,day=df.day),errors="coerce")
+
+# filtre 1980‑2024
+df = df[(df["year"] >= 1980) & (df["year"] <= 2024)].copy()
+
+# convertit TM / TN / TX en numériques pour tester les NaN
+for col in ["TM", "TN", "TX"]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+# supprime les lignes corrompues
+df = df.dropna(subset=["date"])                       # sans date
+mask_all_na = df[["TM", "TN", "TX"]].isna().all(axis=1)
+df = df[~mask_all_na].copy()                          # sans t valides
+
+# enlève les colonnes entièrement vides
+df = df.dropna(axis=1, how="all")
+
+# export 
+OUT = Path("DECADQ_75_1980-2024_CLEAN_FULL.csv")
+df.to_csv(OUT, index=False, sep=";")
+
+
+#--------------------------------------------------------------
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
+
+# ======================================================================
+CSV = Path("DECADQ_75_1980-2024_CLEAN_FULL.csv")
+
+
+df = pd.read_csv(CSV, sep=";", low_memory=False)
+
+# year et month
+df["AAAAMM"] = pd.to_numeric(df["AAAAMM"], errors="coerce")
+df["year"]   = (df["AAAAMM"] // 100).astype(int)
+df["month"]  = pd.to_numeric(df["month"], errors="coerce").astype(int)
+
+# Convertir les colonnes de température en valeurs numériques
+df["NBJTX35"] = pd.to_numeric(df["NBJTX35"], errors="coerce")  # jours ≥35°C par décade
+df["NBJTX0"]  = pd.to_numeric(df["NBJTX0"],  errors="coerce")  # jours ≤ 0°C par décade
+
+# saisons (JJA/DJF) et ajuste l'année d'hiver
+def assign_season(row):
+    m, y = row["month"], row["year"]
+    if m in (6, 7, 8):
+        return pd.Series({"season": "JJA", "season_year": y})
+    if m in (12, 1, 2):
+        # Décembre rattaché à l'hiver de l'année suivante
+        return pd.Series({"season": "DJF", "season_year": y + (1 if m == 12 else 0)})
+    return pd.Series({"season": None, "season_year": None})
+
+df[["season", "season_year"]] = df.apply(assign_season, axis=1)
+
+# Somme des jours canicule et gel par saison
+summer = df[df["season"] == "JJA"].groupby("season_year")["NBJTX35"].sum()
+winter = df[df["season"] == "DJF"].groupby("season_year")["NBJTX0"].sum()
+
+# Trace les jours de canicule et de gel par saison
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(summer.index, summer.values, "-o", color="tomato", label="Jours ≥ 35 °C (été JJA)")
+ax.plot(winter.index, winter.values, "-s", color="steelblue", label="Jours ≤  0 °C (hiver DJF)")
+ax.set_title("Paris – Jours de canicule et de gel par saison (décadal sommation)")
+ax.set_xlabel("Année de saison")
+ax.set_ylabel("Nombre de jours")
+ax.grid(True, linestyle="--", alpha=0.5)
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+#--------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
+
+CSV = Path("DECADQ_75_1980-2024_CLEAN_FULL.csv")
+
+
+df = pd.read_csv(CSV, sep=";", low_memory=False)
+
+
+df["RR"]    = pd.to_numeric(df["RR"], errors="coerce")        # cumul décadal en 1/10 mm
+df["RR_mm"] = df["RR"] / 10.0                                 # mm par décade
+
+df["AAAAMM"] = pd.to_numeric(df["AAAAMM"], errors="coerce")
+df["year"]   = (df["AAAAMM"] // 100).astype(int)
+df["month"]  = pd.to_numeric(df["month"], errors="coerce").astype(int)
+
+
+def season_info(row):
+    m = row["month"]
+    y = row["year"]
+    if m in (12, 1, 2):
+        # hiver DJF rattache décembre à l'année suivante
+        return pd.Series({"season":"DJF", "season_year":y + (1 if m == 12 else 0)})
+    if m in (3, 4, 5):
+        return pd.Series({"season":"MAM", "season_year":y})
+    if m in (6, 7, 8):
+        return pd.Series({"season":"JJA", "season_year":y})
+    return pd.Series({"season":"SON", "season_year":y})
+
+df[["season","season_year"]] = df.apply(season_info, axis=1)
+
+# ------------------------------------------------------------------ 
+# Somme des précipitations par saison
+# ------------------------------------------------------------------
+seasonal = (
+    df.groupby(["season_year","season"])["RR_mm"]
+      .sum()
+      .unstack()
+      .reindex(columns=["DJF","MAM","JJA","SON"])
+      .dropna()
+)
+
+# ------------------------------------------------------------------
+# Calcul des anomalies par rapport à la moyenne 1980 2024
+# ------------------------------------------------------------------
+clim_mean       = seasonal.mean()
+seasonal_anom   = seasonal - clim_mean
+
+# ------------------------------------------------------------------
+# Heatmap des anomalies
+# ------------------------------------------------------------------
+years   = seasonal_anom.index.values
+seasons = ["DJF","MAM","JJA","SON"]
+data    = seasonal_anom[seasons].T.values
+
+# Matrice centrée : simétrique autour de zéro
+max_abs = np.nanmax(np.abs(data))
+
+fig, ax = plt.subplots(figsize=(12, 4))
+c = ax.imshow(
+    data,
+    aspect="auto",
+    cmap="RdBu_r",
+    vmin=-max_abs,
+    vmax=+max_abs,
+    origin="lower"
+)
+
+# Axes et ticks
+ax.set_yticks(np.arange(len(seasons)))
+ax.set_yticklabels(seasons)
+xticks = np.arange(0, len(years), 5)
+ax.set_xticks(xticks)
+ax.set_xticklabels(years[xticks], rotation=45)
+ax.set_xlabel("Année de saison")
+ax.set_title("Paris – Anomalies saisonnières de précipitations (mm)")
+
+# Barre de couleurs
+cb = fig.colorbar(c, ax=ax, orientation="vertical", pad=0.02)
+cb.set_label("Anomalie (mm)")
+
+plt.tight_layout()
+plt.show()
+
+#-------------------------------------------------------------------------
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
+
+CSV_PATH = Path("DECADQ_75_1980-2024_CLEAN_FULL.csv")
+
+
+
+df = pd.read_csv(CSV_PATH, sep=";", low_memory=False)
+
+# Préparer les colonnes
+df["RR"]      = pd.to_numeric(df["RR"], errors="coerce")        # cumul décadaire en 1/10mm
+df["RR_mm"]   = df["RR"] / 10.0                                 # mm par décade
+df["NBJRR30"] = pd.to_numeric(df["NBJRR30"], errors="coerce")   # jours ≥30mm dans la décade
+
+# AAAAMM  année
+df["AAAAMM"] = pd.to_numeric(df["AAAAMM"], errors="coerce")
+df["year"]   = (df["AAAAMM"] // 100).astype(int)
+
+# calcul décennie
+df["decade"] = (df["year"] // 10) * 10
+
+# 4. Histogrammes décennaux de RR_mm
+decades = [1980, 1990, 2000, 2010, 2020]
+fig, axes = plt.subplots(1, len(decades), figsize=(16, 4), sharey=True)
+
+for ax, dec in zip(axes, decades):
+    data = df.loc[df["decade"] == dec, "RR_mm"]
+    ax.hist(data, bins=30, edgecolor="black", alpha=0.7)
+    ax.set_title(f"{dec}s")
+    ax.set_xlabel("RR_mm (mm)")
+    
+    if ax is axes[0]:
+        ax.set_ylabel("Fréquence")
+
+plt.suptitle("Distribution décennale des cumuls décadique RR_mm (Paris 1980–2024)")
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
