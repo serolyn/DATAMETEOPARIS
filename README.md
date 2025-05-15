@@ -1,6 +1,6 @@
 # Climat-Paris — Data Viz & Analyse météo (35 000 lignes)
 
-> **TL;DR** : exploration Python + Pandas + Matplotlib d’un dump météo brut (2018-2024) sur l’Île-de-France, nettoyage → corrélations → visualisations.  
+> **TL;DR** : exploration Python + Pandas + Matplotlib d’un dump météo brut (2018-2024) sur Paris, nettoyage → corrélations → visualisations.  
 > **Demo** : ▶️ `notebooks/00_overview.ipynb` (Binder badge plus bas).
 
 ---
@@ -8,7 +8,7 @@
 ## 0. Pourquoi ça existe ?
 
 - **Objectif perso** : démontrer la chaîne complète _data-science “from scratch”_ (acquisition → cleaning → EDA → visu statique + interactive).
-- **Question centrale** : _“Comment les variables micro-climatiques parisiennes (température, hygrométrie, vent) se comportent-elles spatialement et temporellement ?”_
+- **Question centrale** : _“Paris devient-il méditerranéen ou simplement chaotique ? Entre illusion régionale et réalité globale, comment comprendre le glissement du climat parisien dans un monde en désordre ?”_
 - **Plus-value** : pipeline reproductible + figures prêtes pour un rapport académique.
 
 ---
